@@ -14,7 +14,65 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      competitors: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          url?: string
+        }
+        Relationships: []
+      }
+      price_snapshots: {
+        Row: {
+          competitor_id: string
+          currency: string | null
+          id: string
+          parsed_at: string
+          price: number | null
+          product_label: string | null
+          thickness_mm: number
+        }
+        Insert: {
+          competitor_id: string
+          currency?: string | null
+          id?: string
+          parsed_at?: string
+          price?: number | null
+          product_label?: string | null
+          thickness_mm: number
+        }
+        Update: {
+          competitor_id?: string
+          currency?: string | null
+          id?: string
+          parsed_at?: string
+          price?: number | null
+          product_label?: string | null
+          thickness_mm?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "price_snapshots_competitor_id_fkey"
+            columns: ["competitor_id"]
+            isOneToOne: false
+            referencedRelation: "competitors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
