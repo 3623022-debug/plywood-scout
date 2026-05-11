@@ -9,8 +9,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 import { Loader2, Trash2, Plus, RefreshCw, ExternalLink } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Label } from "@/components/ui/label";
 
 const THICKNESSES = [3, 4, 6, 8, 9, 10, 12, 15, 18, 20];
+const MARKS = ["ФК", "ФСФ", "ФОФ"] as const;
+const FORMATS = ["1525x1525", "2440x1220"] as const;
+const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2"] as const;
+type Mark = (typeof MARKS)[number];
+type Format = (typeof FORMATS)[number];
+type Grade = (typeof GRADES)[number];
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -43,6 +51,9 @@ function Dashboard() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [parsing, setParsing] = useState(false);
+  const [mark, setMark] = useState<Mark>("ФК");
+  const [format, setFormat] = useState<Format>("1525x1525");
+  const [grade, setGrade] = useState<Grade>("4/4");
   const parseFn = useServerFn(parseAllCompetitors);
 
   const load = async () => {
@@ -98,7 +109,7 @@ function Dashboard() {
     }
     setParsing(true);
     try {
-      const res = await parseFn();
+      const res = await parseFn({ data: { mark, format, grade } });
       if (res.errors.length > 0) {
         toast.warning(
           `Готово: ${res.processed}/${competitors.length}. Ошибки: ${res.errors.join(" | ")}`,
@@ -143,7 +154,8 @@ function Dashboard() {
             Мониторинг цен конкурентов
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Фанера ФК, сорт 4/4, ГОСТ 3916.1-2018 · толщины {THICKNESSES.join(", ")} мм
+            Фанера {mark}, сорт {grade}, формат {format.replace("x", "×")} мм, ГОСТ
+            3916.1-2018 · толщины {THICKNESSES.join(", ")} мм
           </p>
         </header>
 
@@ -178,6 +190,59 @@ function Dashboard() {
               <CardTitle className="text-base">Запуск парсера</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              <div className="space-y-3 rounded-md border p-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Марка</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    value={mark}
+                    onValueChange={(v) => v && setMark(v as Mark)}
+                    className="flex flex-wrap justify-start gap-1"
+                  >
+                    {MARKS.map((m) => (
+                      <ToggleGroupItem key={m} value={m} className="px-3">
+                        {m}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Формат, мм</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    value={format}
+                    onValueChange={(v) => v && setFormat(v as Format)}
+                    className="flex flex-wrap justify-start gap-1"
+                  >
+                    {FORMATS.map((f) => (
+                      <ToggleGroupItem key={f} value={f} className="px-3">
+                        {f.replace("x", "×")}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Сорт</Label>
+                  <ToggleGroup
+                    type="single"
+                    variant="outline"
+                    size="sm"
+                    value={grade}
+                    onValueChange={(v) => v && setGrade(v as Grade)}
+                    className="flex flex-wrap justify-start gap-1"
+                  >
+                    {GRADES.map((g) => (
+                      <ToggleGroupItem key={g} value={g} className="px-3">
+                        {g}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+              </div>
               <p className="text-sm text-muted-foreground">
                 Соберёт текущие цены по всем конкурентам ({competitors.length}) и
                 обновит таблицу сравнения.
@@ -248,7 +313,7 @@ function Dashboard() {
         <Card className="mt-6">
           <CardHeader>
             <CardTitle className="text-base">
-              Таблица сравнения цен (ФК 4/4)
+              Таблица сравнения цен ({mark} {grade}, {format.replace("x", "×")} мм)
             </CardTitle>
           </CardHeader>
           <CardContent>
