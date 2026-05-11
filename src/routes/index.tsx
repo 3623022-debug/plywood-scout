@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 const THICKNESSES = [3, 4, 6, 8, 9, 10, 12, 15, 18, 20];
 const MARKS = ["ФК", "ФСФ", "ФОФ"] as const;
 const FORMATS = ["1525x1525", "2440x1220"] as const;
-const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2"] as const;
+const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2", "1/1"] as const;
 type Mark = (typeof MARKS)[number];
 type Format = (typeof FORMATS)[number];
 type Grade = (typeof GRADES)[number];
@@ -42,6 +42,7 @@ type Snapshot = {
   currency: string | null;
   product_label: string | null;
   parsed_at: string;
+  grade: string;
 };
 
 function Dashboard() {
@@ -53,7 +54,7 @@ function Dashboard() {
   const [parsing, setParsing] = useState(false);
   const [mark, setMark] = useState<Mark>("ФК");
   const [format, setFormat] = useState<Format>("1525x1525");
-  const [grade, setGrade] = useState<Grade>("4/4");
+  const [grades, setGrades] = useState<Grade[]>(["4/4"]);
   const parseFn = useServerFn(parseAllCompetitors);
 
   const load = async () => {
@@ -109,7 +110,12 @@ function Dashboard() {
     }
     setParsing(true);
     try {
-      const res = await parseFn({ data: { mark, format, grade } });
+      if (grades.length === 0) {
+        toast.error("Выберите хотя бы один сорт");
+        setParsing(false);
+        return;
+      }
+      const res = await parseFn({ data: { mark, format, grades } });
       if (res.errors.length > 0) {
         toast.warning(
           `Готово: ${res.processed}/${competitors.length}. Ошибки: ${res.errors.join(" | ")}`,
@@ -125,9 +131,12 @@ function Dashboard() {
     }
   };
 
-  const cellFor = (competitorId: string, thickness: number) => {
+  const cellFor = (competitorId: string, thickness: number, grade: string) => {
     const snap = snapshots.find(
-      (s) => s.competitor_id === competitorId && Number(s.thickness_mm) === thickness,
+      (s) =>
+        s.competitor_id === competitorId &&
+        Number(s.thickness_mm) === thickness &&
+        s.grade === grade,
     );
     if (!snap || snap.price === null || snap.price === undefined) {
       return <span className="text-muted-foreground">—</span>;
@@ -154,8 +163,9 @@ function Dashboard() {
             Мониторинг цен конкурентов
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Фанера {mark}, сорт {grade}, формат {format.replace("x", "×")} мм, ГОСТ
-            3916.1-2018 · толщины {THICKNESSES.join(", ")} мм
+            Фанера {mark}, сорт{grades.length > 1 ? "а" : ""} {grades.join(", ")},
+            формат {format.replace("x", "×")} мм, ГОСТ 3916.1-2018 · толщины{" "}
+            {THICKNESSES.join(", ")} мм
           </p>
         </header>
 
@@ -226,13 +236,28 @@ function Dashboard() {
                   </ToggleGroup>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Сорт</Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs text-muted-foreground">Сорт</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() =>
+                        setGrades(
+                          grades.length === GRADES.length ? ["4/4"] : [...GRADES],
+                        )
+                      }
+                    >
+                      {grades.length === GRADES.length ? "Сбросить" : "Все"}
+                    </Button>
+                  </div>
                   <ToggleGroup
-                    type="single"
+                    type="multiple"
                     variant="outline"
                     size="sm"
-                    value={grade}
-                    onValueChange={(v) => v && setGrade(v as Grade)}
+                    value={grades}
+                    onValueChange={(v) => setGrades(v as Grade[])}
                     className="flex flex-wrap justify-start gap-1"
                   >
                     {GRADES.map((g) => (
@@ -313,7 +338,7 @@ function Dashboard() {
         <Card className="mt-6">
           <CardHeader>
             <CardTitle className="text-base">
-              Таблица сравнения цен ({mark} {grade}, {format.replace("x", "×")} мм)
+              Таблица сравнения цен ({mark}, {format.replace("x", "×")} мм)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -324,6 +349,7 @@ function Dashboard() {
                     <th className="sticky left-0 z-10 bg-background px-3 py-2 text-left font-semibold">
                       Конкурент / Толщина
                     </th>
+                    <th className="px-3 py-2 text-left font-semibold">Сорт</th>
                     {THICKNESSES.map((t) => (
                       <th
                         key={t}
@@ -338,25 +364,28 @@ function Dashboard() {
                   {competitors.length === 0 && (
                     <tr>
                       <td
-                        colSpan={THICKNESSES.length + 1}
+                        colSpan={THICKNESSES.length + 2}
                         className="px-3 py-6 text-center text-muted-foreground"
                       >
                         Добавьте конкурентов и запустите парсер
                       </td>
                     </tr>
                   )}
-                  {competitors.map((c) => (
-                    <tr key={c.id} className="border-b last:border-0">
-                      <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">
-                        {c.name}
-                      </td>
-                      {THICKNESSES.map((t) => (
-                        <td key={t} className="px-3 py-2 text-right">
-                          {cellFor(c.id, t)}
+                  {competitors.flatMap((c) =>
+                    grades.map((g, gi) => (
+                      <tr key={`${c.id}-${g}`} className="border-b last:border-0">
+                        <td className="sticky left-0 z-10 bg-background px-3 py-2 font-medium">
+                          {gi === 0 ? c.name : ""}
                         </td>
-                      ))}
-                    </tr>
-                  ))}
+                        <td className="px-3 py-2 text-muted-foreground">{g}</td>
+                        {THICKNESSES.map((t) => (
+                          <td key={t} className="px-3 py-2 text-right">
+                            {cellFor(c.id, t, g)}
+                          </td>
+                        ))}
+                      </tr>
+                    )),
+                  )}
                 </tbody>
               </table>
             </div>
