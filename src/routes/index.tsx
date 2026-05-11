@@ -11,6 +11,14 @@ import { Toaster } from "@/components/ui/sonner";
 import { Loader2, Trash2, Plus, RefreshCw, ExternalLink } from "lucide-react";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Label } from "@/components/ui/label";
+import * as XLSX from "xlsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Download } from "lucide-react";
 
 const THICKNESSES = [3, 4, 6, 8, 9, 10, 12, 15, 18, 20];
 const MARKS = ["ФК", "ФСФ", "ФОФ"] as const;
@@ -153,6 +161,96 @@ function Dashboard() {
   const lastUpdate = snapshots
     .map((s) => new Date(s.parsed_at).getTime())
     .reduce((a, b) => Math.max(a, b), 0);
+
+  const buildExportData = () => {
+    const header = ["Конкурент", "Сорт", ...THICKNESSES.map((t) => `${t} мм`)];
+    const rows: (string | number)[][] = [];
+    competitors.forEach((c) => {
+      grades.forEach((g, gi) => {
+        const row: (string | number)[] = [gi === 0 ? c.name : "", g];
+        THICKNESSES.forEach((t) => {
+          const snap = snapshots.find(
+            (s) =>
+              s.competitor_id === c.id &&
+              Number(s.thickness_mm) === t &&
+              s.grade === g,
+          );
+          row.push(
+            snap && snap.price !== null && snap.price !== undefined
+              ? Number(snap.price)
+              : "",
+          );
+        });
+        rows.push(row);
+      });
+    });
+    return { header, rows };
+  };
+
+  const fileBase = () => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
+    return `prices_${mark}_${format}_${stamp}`;
+  };
+
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportXlsx = () => {
+    const { header, rows } = buildExportData();
+    const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Цены");
+    XLSX.writeFile(wb, `${fileBase()}.xlsx`);
+  };
+
+  const exportCsv = () => {
+    const { header, rows } = buildExportData();
+    const escape = (v: string | number) => {
+      const s = String(v ?? "");
+      return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [header, ...rows].map((r) => r.map(escape).join(";")).join("\n");
+    downloadBlob(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" }), `${fileBase()}.csv`);
+  };
+
+  const exportJson = () => {
+    const data = competitors.flatMap((c) =>
+      grades.map((g) => ({
+        competitor: c.name,
+        url: c.url,
+        mark,
+        format,
+        grade: g,
+        prices: Object.fromEntries(
+          THICKNESSES.map((t) => {
+            const snap = snapshots.find(
+              (s) =>
+                s.competitor_id === c.id &&
+                Number(s.thickness_mm) === t &&
+                s.grade === g,
+            );
+            return [t, snap?.price ?? null];
+          }),
+        ),
+      })),
+    );
+    downloadBlob(
+      new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }),
+      `${fileBase()}.json`,
+    );
+  };
+
+  const hasData = competitors.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -337,9 +435,23 @@ function Dashboard() {
 
         <Card className="mt-6">
           <CardHeader>
-            <CardTitle className="text-base">
-              Таблица сравнения цен ({mark}, {format.replace("x", "×")} мм)
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base">
+                Таблица сравнения цен ({mark}, {format.replace("x", "×")} мм)
+              </CardTitle>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={!hasData}>
+                    <Download className="mr-2 h-4 w-4" /> Экспорт
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportXlsx}>Excel (.xlsx)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportCsv}>CSV (.csv)</DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportJson}>JSON (.json)</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
