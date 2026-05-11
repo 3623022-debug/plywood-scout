@@ -39,6 +39,7 @@ export type Database = {
         Row: {
           competitor_id: string
           currency: string | null
+          grade: string
           id: string
           parsed_at: string
           price: number | null
@@ -48,6 +49,7 @@ export type Database = {
         Insert: {
           competitor_id: string
           currency?: string | null
+          grade?: string
           id?: string
           parsed_at?: string
           price?: number | null
@@ -57,6 +59,7 @@ export type Database = {
         Update: {
           competitor_id?: string
           currency?: string | null
+          grade?: string
           id?: string
           parsed_at?: string
           price?: number | null
