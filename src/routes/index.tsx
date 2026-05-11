@@ -139,6 +139,24 @@ function Dashboard() {
     }
   };
 
+  const minPriceFor = (thickness: number, grade: string): number | null => {
+    const prices = competitors
+      .map((c) => {
+        const snap = snapshots.find(
+          (s) =>
+            s.competitor_id === c.id &&
+            Number(s.thickness_mm) === thickness &&
+            s.grade === grade,
+        );
+        return snap && snap.price !== null && snap.price !== undefined
+          ? Number(snap.price)
+          : null;
+      })
+      .filter((p): p is number => p !== null && p > 0);
+    if (prices.length < 2) return null;
+    return Math.min(...prices);
+  };
+
   const cellFor = (competitorId: string, thickness: number, grade: string) => {
     const snap = snapshots.find(
       (s) =>
@@ -151,8 +169,13 @@ function Dashboard() {
     }
     const price = Number(snap.price);
     const cur = snap.currency ?? "RUB";
+    const min = minPriceFor(thickness, grade);
+    const isMin = min !== null && price === min;
     return (
-      <span title={snap.product_label ?? ""} className="font-medium tabular-nums">
+      <span
+        title={snap.product_label ?? ""}
+        className={`font-medium tabular-nums ${isMin ? "text-red-600 font-bold" : ""}`}
+      >
         {price.toLocaleString("ru-RU")} {cur}
       </span>
     );
