@@ -3,6 +3,13 @@ import { createClient } from "@supabase/supabase-js";
 
 const THICKNESSES = [3, 4, 6, 8, 9, 10, 12, 15, 18, 20];
 
+const MARKS = ["ФК", "ФСФ", "ФОФ"] as const;
+const FORMATS = ["1525x1525", "2440x1220"] as const;
+const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2"] as const;
+type Mark = (typeof MARKS)[number];
+type Format = (typeof FORMATS)[number];
+type Grade = (typeof GRADES)[number];
+
 function getAdmin() {
   const url = process.env.SUPABASE_URL!;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -44,19 +51,31 @@ type ExtractedPrice = {
 async function extractPricesWithAI(
   markdown: string,
   competitorName: string,
+  mark: Mark,
+  format: Format,
+  grade: Grade,
 ): Promise<ExtractedPrice[]> {
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
   const trimmed = markdown.slice(0, 60000);
 
+  const markHint =
+    mark === "ФОФ"
+      ? `марке ФОФ (учитывай также позиции, обозначенные как "ламинированная" / "ламинированная фанера" — считай их ФОФ)`
+      : `марке ${mark}`;
+  const formatHuman = format.replace("x", "×");
+  const ignoreMarks = MARKS.filter((m) => m !== mark)
+    .map((m) => (m === "ФОФ" ? "ФОФ/ламинированную" : m))
+    .join(", ");
+
   const systemPrompt = `Ты извлекаешь цены на фанеру из текста каталога конкурента "${competitorName}".
-Целевой товар: фанера ФК, сорт 4/4, ГОСТ 3916.1-2018.
+Целевой товар: фанера ${mark}, сорт ${grade}, формат ${formatHuman} мм, ГОСТ 3916.1-2018.
 Нужны цены за лист (или за м³ если за лист нет) для толщин: ${THICKNESSES.join(", ")} мм.
 Верни ТОЛЬКО JSON-массив объектов вида:
 { "thickness_mm": число, "price": число | null, "currency": "RUB"|"USD"|"EUR"|null, "product_label": "краткое описание позиции" | null }
 По одной записи на каждую толщину из списка. Если для толщины подходящей цены не нашлось — price: null.
-Бери только позиции, явно соответствующие марке ФК и сорту 4/4 (или максимально близкие). Игнорируй ФСФ, ламинированную, березовую сорта 1/1, 2/2 и т.п.`;
+Бери только позиции, явно соответствующие ${markHint}, сорту ${grade} и формату ${formatHuman} мм (или максимально близкие). Игнорируй другие марки (${ignoreMarks}) и другие сорта/форматы.`;
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
@@ -128,8 +147,14 @@ async function extractPricesWithAI(
   return Array.from(byThickness.values());
 }
 
-export const parseAllCompetitors = createServerFn({ method: "POST" }).handler(
-  async () => {
+export const parseAllCompetitors = createServerFn({ method: "POST" })
+  .inputValidator((data: { mark: Mark; format: Format; grade: Grade }) => {
+    if (!MARKS.includes(data.mark)) throw new Error("Invalid mark");
+    if (!FORMATS.includes(data.format)) throw new Error("Invalid format");
+    if (!GRADES.includes(data.grade)) throw new Error("Invalid grade");
+    return data;
+  })
+  .handler(async ({ data }) => {
     const admin = getAdmin();
     const { data: competitors, error } = await admin
       .from("competitors")
@@ -145,7 +170,13 @@ export const parseAllCompetitors = createServerFn({ method: "POST" }).handler(
     for (const c of competitors) {
       try {
         const md = await firecrawlScrape(c.url);
-        const prices = await extractPricesWithAI(md, c.name);
+        const prices = await extractPricesWithAI(
+          md,
+          c.name,
+          data.mark,
+          data.format,
+          data.grade,
+        );
 
         await admin
           .from("price_snapshots")
@@ -171,5 +202,4 @@ export const parseAllCompetitors = createServerFn({ method: "POST" }).handler(
     }
 
     return { ok: true, processed, errors };
-  },
-);
+  });
