@@ -5,7 +5,7 @@ const THICKNESSES = [3, 4, 6, 8, 9, 10, 12, 15, 18, 20];
 
 const MARKS = ["ФК", "ФСФ", "ФОФ"] as const;
 const FORMATS = ["1525x1525", "2440x1220"] as const;
-const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2"] as const;
+const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2", "1/1"] as const;
 type Mark = (typeof MARKS)[number];
 type Format = (typeof FORMATS)[number];
 type Grade = (typeof GRADES)[number];
@@ -148,10 +148,14 @@ async function extractPricesWithAI(
 }
 
 export const parseAllCompetitors = createServerFn({ method: "POST" })
-  .inputValidator((data: { mark: Mark; format: Format; grade: Grade }) => {
+  .inputValidator((data: { mark: Mark; format: Format; grades: Grade[] }) => {
     if (!MARKS.includes(data.mark)) throw new Error("Invalid mark");
     if (!FORMATS.includes(data.format)) throw new Error("Invalid format");
-    if (!GRADES.includes(data.grade)) throw new Error("Invalid grade");
+    if (!Array.isArray(data.grades) || data.grades.length === 0)
+      throw new Error("Select at least one grade");
+    for (const g of data.grades) {
+      if (!GRADES.includes(g)) throw new Error("Invalid grade");
+    }
     return data;
   })
   .handler(async ({ data }) => {
@@ -170,30 +174,32 @@ export const parseAllCompetitors = createServerFn({ method: "POST" })
     for (const c of competitors) {
       try {
         const md = await firecrawlScrape(c.url);
-        const prices = await extractPricesWithAI(
-          md,
-          c.name,
-          data.mark,
-          data.format,
-          data.grade,
-        );
-
-        await admin
-          .from("price_snapshots")
-          .delete()
-          .eq("competitor_id", c.id);
-
-        const rows = prices.map((p) => ({
-          competitor_id: c.id,
-          thickness_mm: p.thickness_mm,
-          price: p.price,
-          currency: p.currency,
-          product_label: p.product_label,
-        }));
-        const { error: insErr } = await admin
-          .from("price_snapshots")
-          .insert(rows);
-        if (insErr) throw new Error(insErr.message);
+        for (const grade of data.grades) {
+          const prices = await extractPricesWithAI(
+            md,
+            c.name,
+            data.mark,
+            data.format,
+            grade,
+          );
+          await admin
+            .from("price_snapshots")
+            .delete()
+            .eq("competitor_id", c.id)
+            .eq("grade", grade);
+          const rows = prices.map((p) => ({
+            competitor_id: c.id,
+            thickness_mm: p.thickness_mm,
+            price: p.price,
+            currency: p.currency,
+            product_label: p.product_label,
+            grade,
+          }));
+          const { error: insErr } = await admin
+            .from("price_snapshots")
+            .insert(rows);
+          if (insErr) throw new Error(insErr.message);
+        }
         processed++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
