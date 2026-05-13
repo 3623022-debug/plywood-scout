@@ -5,7 +5,7 @@ const THICKNESSES = [3, 4, 6, 8, 9, 10, 12, 15, 18, 20];
 
 const MARKS = ["ФК", "ФСФ", "ФОФ"] as const;
 const FORMATS = ["1525x1525", "2440x1220"] as const;
-const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2", "1/1"] as const;
+const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2", "1/1", "стр"] as const;
 type Mark = (typeof MARKS)[number];
 type Format = (typeof FORMATS)[number];
 type Grade = (typeof GRADES)[number];
@@ -69,13 +69,17 @@ async function extractPricesWithAI(
     .map((m) => (m === "ФОФ" ? "ФОФ/ламинированную" : m))
     .join(", ");
 
+  const gradeHuman =
+    grade === "стр"
+      ? `строительная (ищи позиции, где явно указано слово "строительная" — это и есть искомый сорт)`
+      : `${grade}`;
   const systemPrompt = `Ты извлекаешь цены на фанеру из текста каталога конкурента "${competitorName}".
 Целевой товар: фанера ${mark}, сорт ${grade}, формат ${formatHuman} мм, ГОСТ 3916.1-2018.
 Нужны цены за лист (или за м³ если за лист нет) для толщин: ${THICKNESSES.join(", ")} мм.
 Верни ТОЛЬКО JSON-массив объектов вида:
 { "thickness_mm": число, "price": число | null, "currency": "RUB"|"USD"|"EUR"|null, "product_label": "краткое описание позиции" | null }
 По одной записи на каждую толщину из списка. Если для толщины подходящей цены не нашлось — price: null.
-Бери только позиции, явно соответствующие ${markHint}, сорту ${grade} и формату ${formatHuman} мм (или максимально близкие). Игнорируй другие марки (${ignoreMarks}) и другие сорта/форматы.`;
+Бери только позиции, явно соответствующие ${markHint}, сорту ${gradeHuman} и формату ${formatHuman} мм (или максимально близкие). Игнорируй другие марки (${ignoreMarks}) и другие сорта/форматы.`;
 
   const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
