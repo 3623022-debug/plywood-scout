@@ -23,7 +23,7 @@ import { Download } from "lucide-react";
 const THICKNESSES = [3, 4, 6, 8, 9, 10, 12, 15, 18, 20];
 const MARKS = ["ФК", "ФСФ", "ФОФ"] as const;
 const FORMATS = ["1525x1525", "2440x1220"] as const;
-const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2", "1/1"] as const;
+const GRADES = ["4/4", "3/4", "2/4", "2/3", "2/2", "1/2", "1/1", "стр"] as const;
 type Mark = (typeof MARKS)[number];
 type Format = (typeof FORMATS)[number];
 type Grade = (typeof GRADES)[number];
