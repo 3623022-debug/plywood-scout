@@ -48,6 +48,180 @@ type ExtractedPrice = {
   product_label: string | null;
 };
 
+type CandidatePrice = ExtractedPrice & {
+  unit: "sheet" | "m3" | "unknown";
+};
+
+function normalizeText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[\\]/g, "/")
+    .replace(/[х×*]/g, "x")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getGradeRegex(grade: Grade): RegExp {
+  if (grade === "стр") return /строительн/iu;
+
+  const romanMap: Record<string, string> = {
+    "1": "i",
+    "2": "ii",
+    "3": "iii",
+    "4": "iv",
+  };
+  const [left, right] = grade.split("/");
+  const leftAlt = `${left}|${romanMap[left]}`;
+  const rightAlt = `${right}|${romanMap[right]}`;
+
+  return new RegExp(
+    `(?:сорт\\s*)?(?:${leftAlt})\\s*\\/\\s*(?:${rightAlt})(?!\\d)`,
+    "iu",
+  );
+}
+
+function matchesMark(text: string, mark: Mark): boolean {
+  const normalized = normalizeText(text);
+  if (mark === "ФОФ") {
+    return /\bфоф\b|ламинирован/iu.test(normalized);
+  }
+
+  return normalized.includes(normalizeText(mark));
+}
+
+function matchesFormat(text: string, format: Format): boolean {
+  const normalized = normalizeText(text);
+  const [a, b] = format.split("x");
+  return (
+    normalized.includes(`${a}x${b}`) || normalized.includes(`${b}x${a}`)
+  );
+}
+
+function matchesGrade(text: string, grade: Grade): boolean {
+  return getGradeRegex(grade).test(normalizeText(text));
+}
+
+function parseCurrency(value: string | undefined): string | null {
+  const normalized = normalizeText(value ?? "");
+  if (!normalized) return null;
+  if (normalized.includes("usd")) return "USD";
+  if (normalized.includes("eur")) return "EUR";
+  if (normalized.includes("руб") || normalized.includes("rur") || normalized.includes("rub") || normalized.includes("₽")) {
+    return "RUB";
+  }
+  return null;
+}
+
+function parseThickness(text: string): number | null {
+  const match = normalizeText(text).match(/(?:толщина\s*)?(\d+(?:[.,]\d+)?)\s*мм/iu);
+  if (!match) return null;
+
+  const value = Number(match[1].replace(",", "."));
+  return Number.isFinite(value) ? value : null;
+}
+
+function getUnitPriority(unit: CandidatePrice["unit"]): number {
+  if (unit === "sheet") return 3;
+  if (unit === "m3") return 2;
+  return 1;
+}
+
+function chooseBetterCandidate(
+  current: CandidatePrice | undefined,
+  next: CandidatePrice,
+): CandidatePrice {
+  if (!current || current.price === null) return next;
+  if (next.price === null) return current;
+
+  const currentPriority = getUnitPriority(current.unit);
+  const nextPriority = getUnitPriority(next.unit);
+  if (nextPriority !== currentPriority) {
+    return nextPriority > currentPriority ? next : current;
+  }
+
+  return next.price < current.price ? next : current;
+}
+
+function pickProductLabel(row: string): string | null {
+  const matches = Array.from(
+    row.matchAll(/\[([^\]]*фанер[^\]]*)\]\([^)]*\)/giu),
+  ).map((match) => match[1].replace(/\\+/g, "/").trim());
+
+  if (matches.length === 0) return null;
+
+  return matches.sort((a, b) => {
+    const score = (label: string) => {
+      let value = label.length;
+      if (/сорт|строительн|фк|фсф|фоф|ламинирован/iu.test(label)) value += 100;
+      if (/\d+\s*мм/iu.test(label)) value += 50;
+      if (/\d{3,4}\s*[xх×*]\s*\d{3,4}/iu.test(label)) value += 50;
+      return value;
+    };
+
+    return score(b) - score(a);
+  })[0];
+}
+
+function extractPricesHeuristically(
+  markdown: string,
+  mark: Mark,
+  format: Format,
+  grade: Grade,
+): ExtractedPrice[] {
+  const byThickness = new Map<number, CandidatePrice>();
+  for (const t of THICKNESSES) {
+    byThickness.set(t, {
+      thickness_mm: t,
+      price: null,
+      currency: null,
+      product_label: null,
+      unit: "unknown",
+    });
+  }
+
+  const rows = markdown
+    .split("\n")
+    .filter((line) => line.includes("|") && /фанер/iu.test(line) && /(руб|₽|usd|eur)/iu.test(line));
+
+  for (const row of rows) {
+    const label = pickProductLabel(row);
+    if (!label) continue;
+
+    const searchable = `${label} ${row}`;
+    if (!matchesMark(searchable, mark)) continue;
+    if (!matchesFormat(searchable, format)) continue;
+    if (!matchesGrade(searchable, grade)) continue;
+
+    const thickness = parseThickness(searchable);
+    if (!thickness || !THICKNESSES.includes(thickness)) continue;
+
+    const priceMatch = row.match(
+      /(\d[\d\s]*(?:[.,]\d+)?)\s*(?:<br>\s*)?(руб|₽|RUB|RUR|USD|EUR)\s*(?:\/\s*(лист|м3|м³|m3))?/iu,
+    );
+    if (!priceMatch) continue;
+
+    const price = Number(priceMatch[1].replace(/\s+/g, "").replace(",", "."));
+    if (!Number.isFinite(price)) continue;
+
+    const unitRaw = normalizeText(priceMatch[3] ?? "");
+    const candidate: CandidatePrice = {
+      thickness_mm: thickness,
+      price,
+      currency: parseCurrency(priceMatch[2]),
+      product_label: label,
+      unit: unitRaw.includes("лист") ? "sheet" : unitRaw ? "m3" : "unknown",
+    };
+
+    byThickness.set(
+      thickness,
+      chooseBetterCandidate(byThickness.get(thickness), candidate),
+    );
+  }
+
+  return Array.from(byThickness.values()).map(({ unit: _unit, ...item }) => item);
+}
+
 async function extractPricesWithAI(
   markdown: string,
   competitorName: string,
@@ -55,6 +229,11 @@ async function extractPricesWithAI(
   format: Format,
   grade: Grade,
 ): Promise<ExtractedPrice[]> {
+  const heuristicResults = extractPricesHeuristically(markdown, mark, format, grade);
+  if (heuristicResults.some((item) => item.price !== null)) {
+    return heuristicResults;
+  }
+
   const apiKey = process.env.LOVABLE_API_KEY;
   if (!apiKey) throw new Error("LOVABLE_API_KEY is not configured");
 
@@ -148,7 +327,12 @@ async function extractPricesWithAI(
         typeof o.product_label === "string" ? o.product_label : null,
     });
   }
-  return Array.from(byThickness.values());
+  const aiResults = Array.from(byThickness.values());
+  if (aiResults.some((item) => item.price !== null)) {
+    return aiResults;
+  }
+
+  return heuristicResults;
 }
 
 export const parseAllCompetitors = createServerFn({ method: "POST" })
